@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>19x19 Go Board</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            flex-direction: column; /* Align elements from top to bottom */
+            max-height: 100vh;
+            overflow-y: auto;
+            width: 100vw;
+            box-sizing: border-box;
+        }
+        #turn-indicator {
+            padding: 10px;
+            font-size: 18px;
+            text-align: center;
+        }
+        #board-container {
+            position: relative;
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px; /* Slim margin */
+            box-sizing: border-box;
+        }
+        #board {
+            border: 1px solid black;
+            cursor: crosshair;
+            background-color: #deb887; /* Wooden color */
+            width: 90%; /* Full width of the container */
+            height: 90%; /* Full height of the container */
+        }
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0; /* Margin above and below buttons */
+            justify-content: center; /* Center buttons horizontally */
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+    <script>
+        let turn = 'black'; // Start with black stone
+        const stones = new Map(); // Map to store stone positions and colors
+        let gameOver = false;
+
+        function sendData(x, y) {
+            console.log(`Sending data: {x: ${x}, y: ${y}, color: ${turn}}`);
+        }
+
+        function handleClick(event) {
+            if (gameOver) return;
+
+            const rect = event.target.getBoundingClientRect();
+            const x = event.clientX - rect.left; // x position within the element.
+            const y = event.clientY - rect.top;  // y position within the element.
+            
+            // Calculate the closest intersection point
+            const gridSize = event.target.width / 19;
+            const col = Math.round(x / gridSize);
+            const row = Math.round(y / gridSize);
+            
+            // Check if the position is already occupied
+            const position = `${row},${col}`;
+            if (stones.has(position)) {
+                console.log(`Position (${row}, ${col}) is already occupied.`);
+                return;
+            }
+            
+            // Store the stone position and color
+            stones.set(position, turn);
+            
+            // Redraw the board with all stones
+            redrawBoard();
+            
+            // Check for 5 consecutive stones
+            if (checkForWin(row, col, turn)) {
+                document.getElementById('turn-indicator').textContent = `${turn.charAt(0).toUpperCase() + turn.slice(1)} wins!`;
+                gameOver = true;
+                return;
+            }
+            
+            // Alternate turns
+            turn = (turn === 'black') ? 'white' : 'black';
+            document.getElementById('turn-indicator').textContent = `Turn: ${turn.charAt(0).toUpperCase() + turn.slice(1)}`;
+
+            sendData(col, row);
+        }
+
+        function checkForWin(row, col, color) {
+            return (
+                checkDirection(row, col, color, 1, 0) ||  // Horizontal
+                checkDirection(row, col, color, 0, 1) ||  // Vertical
+                checkDirection(row, col, color, 1, 1) ||  // Diagonal \
+                checkDirection(row, col, color, 1, -1)    // Diagonal /
+            );
+        }
+
+        function checkDirection(row, col, color, rowDir, colDir) {
+            let count = 1;
+
+            // Check in the positive direction
+            for (let i = 1; i < 5; i++) {
+                const newRow = row + i * rowDir;
+                const newCol = col + i * colDir;
+                if (stones.get(`${newRow},${newCol}`) === color) {
+                    count++;
+                } else {
+                    break;
+                }
+            }
+
+            // Check in the negative direction
+            for (let i = 1; i < 5; i++) {
+                const newRow = row - i * rowDir;
+                const newCol = col - i * colDir;
+                if (stones.get(`${newRow},${newCol}`) === color) {
+                    count++;
+                } else {
+                    break;
+                }
+            }
+
+            return count >= 5;
+        }
+
+        function drawBoard(ctx, width, height) {
+            const size = 19;
+            const cellSize = width / size;
+
+            // Clear the canvas
+            ctx.clearRect(0, 0, width, height);
+
+            // Draw vertical lines
+            for (let i = 0; i <= size; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * cellSize, 0);
+                ctx.lineTo(i * cellSize, height);
+                ctx.stroke();
+            }
+
+            // Draw horizontal lines
+            for (let i = 0; i <= size; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, i * cellSize);
+                ctx.lineTo(width, i * cellSize);
+                ctx.stroke();
+            }
+        }
+
+        function drawStone(row, col, color, ctx, cellSize) {
+            const centerX = col * cellSize;
+            const centerY = row * cellSize;
+            const radius = Math.floor(cellSize / 2 * 0.8); // Stone size slightly smaller than cell
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function redrawBoard() {
+            const canvas = document.getElementById('board');
+            const ctx = canvas.getContext('2d');
+
+            // Determine the dimensions of the container
+            const containerWidth = Math.floor(document.getElementById('board-container').clientWidth);
+            const containerHeight = Math.floor(document.getElementById('board-container').clientHeight);
+
+            // Set canvas dimensions based on the longer side
+            const maxSize = Math.min(containerWidth, containerHeight);
+            const canvasSize = Math.floor(maxSize - 20); // Leave some space around the edges
+
+            // Set canvas dimensions
+            canvas.width = canvasSize;
+            canvas.height = canvasSize;
+            canvas.style.width = `${canvasSize}px`;
+            canvas.style.height = `${canvasSize}px`;
+
+            // Clear the canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the board
+            drawBoard(ctx, canvas.width, canvas.height);
+
+            // Draw all stones
+            const size = 19;
+            const cellSize = canvas.width / size;
+            stones.forEach((color, position) => {
+                const [row, col] = position.split(',').map(Number);
+                drawStone(row, col, color, ctx, cellSize);
+            });
+        }
+
+        function clearBoard() {
+            stones.clear();
+            gameOver = false;
+            turn = 'black';
+            document.getElementById('turn-indicator').textContent = 'Turn: Black';
+            redrawBoard();
+        }
+
+        window.onload = function() {
+            redrawBoard();
+            const canvas = document.getElementById('board');
+            canvas.onclick = handleClick;
+            window.addEventListener('resize', redrawBoard);
+            window.addEventListener('orientationchange', redrawBoard); // Handle orientation change
+        };
+
+        function handleButtonClick(action) {
+            if (action === 'clear') {
+                clearBoard();
+            } else {
+                console.log(`Button action: ${action}`);
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div id="turn-indicator">Turn: Black</div>
+        <div id="board-container">
+            <canvas id="board"></canvas>
+        </div>
+        <div class="buttons">
+            <button onclick="handleButtonClick('clear')">Clear</button>
+            <button onclick="handleButtonClick('resign')">Resign</button>
+            <button onclick="handleButtonClick('mainMenu')">Main Menu</button>
+            <button onclick="handleButtonClick('hint')">Hint</button>
+            <button onclick="handleButtonClick('takeBack')">Take Back</button>
+        </div>
+    </div>
+</body>
+</html>
