@@ -1,1 +1,10 @@
+# ignore vsc configurations
+.vscode/
+
+# Ignore Builds
 test_builds/
+*.exe
+*.o
+
+# Workflow Notes
+*.bkp
