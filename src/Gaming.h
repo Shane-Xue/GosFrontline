@@ -4,8 +4,10 @@
 ///@author Shane-Xue
 
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
+#include <stdexcept>
 #include "Board.h"
 
 namespace GosFrontline
@@ -22,7 +24,8 @@ namespace GosFrontline
     Sente = 1,
     Gote = 2
   };
-  enum class ViolationPolicy{
+  enum class ViolationPolicy
+  {
     Strict,
     Remind,
     Off
@@ -42,11 +45,14 @@ namespace GosFrontline
   private:
     using GoBoard = Board<PieceType>;
     using Shift = std::pair<int, int>;
+    using Move = std::tuple<int, int, PieceType>;
     GoBoard board;
     std::string senteName, goteName;
     EngineStatus engine;
-    int moveCount = 1;
+    int moveCount = 0; // Number of moves made, not current move number
     ViolationPolicy violationPolicy = ViolationPolicy::Strict;
+    std::vector<Move> moves{};
+    friend class MCTS;
 
     std::vector<Shift> directions{
         {1, 0}, // Horizontal
@@ -95,7 +101,7 @@ namespace GosFrontline
     ///         1 = half open
     ///         2 = open
     /// @note This function is made private since I only want the bad move detection to use it when flagging the open-3s and open-4s.
-    int openDegree(int row, int col, Direction dir)
+    int openDegree(int row, int col, Direction dir) const
     {
       PieceType current = board.at(row, col);
       if (current == PieceType::None)
@@ -120,25 +126,21 @@ namespace GosFrontline
       return openity;
     }
 
-    /// @brief Check if there is a genuine five.
-    /// @param row 
-    /// @param col 
-    /// @return Whether a genuine 5 exists in either direction of this position.
-    /// @note This function exists since there is a overrule law in the determination of rule violations.
-    /// I.E. when a violation and a 5 exist together, one side still wins.
-    bool hasFive(int row, int col) const
+    /// @brief Log move onto the move log
+    /// @throws std::invalid_argument when coordinates are invalid.
+    /// @param row
+    /// @param col
+    /// @note Please check if row and col are valid *outside* of the function.
+    ///       Function was declared as private to prevent record hacking.
+    void recordMove(int row, int col)
     {
-      if (board.at(row, col) == PieceType::None)
-        return false;
-
-      for (size_t i = 0; i < 4; i++)
+      if (not board.validateCoords(row, col))
       {
-        if (directionCount(row, col, static_cast<Direction>(i)) == 5)
-        {
-          return true;
-        }
+        throw std::invalid_argument("Invalid coordinates");
       }
-      return false;
+
+      moves.push_back(std::make_tuple(row, col, toMove()));
+      moveCount++;
     }
 
   public:
@@ -180,33 +182,42 @@ namespace GosFrontline
       engine = EngineStatus::Gote; // Default engine status
     }
 
+    /// @brief This does what its name says.
+    /// @param policy
     void setViolationPolicy(ViolationPolicy policy)
     {
       violationPolicy = policy;
     }
 
+    /// @brief This does what its name says.
+    /// @param name
     void setSenteName(const std::string &name)
     {
       senteName = name;
     }
 
+    /// @brief This does what its name says.
+    /// @param name
     void setGoteName(const std::string &name)
     {
       goteName = name;
     }
 
+    /// @brief This does what its name says.
+    /// @param status
     void setEngineStatus(EngineStatus status)
     {
       engine = status;
     }
 
+    /// @brief This does what its name says.
+    /// @param sente
+    /// @param gote
     void setNames(const std::string &sente, const std::string &gote)
     {
       senteName = sente;
       goteName = gote;
     }
-
-    
 
     /// @brief Max number of connected stones in all four directions
     /// @param row
@@ -251,10 +262,10 @@ namespace GosFrontline
     /// @return Side that has won. PieceType::None if no winner
     PieceType checkCurrentWin(int row, int col) const
     {
-      
+
       if (board.at(row, col) == PieceType::None)
         return PieceType::None;
-        int currentCount = maxConnect(row, col);
+      int currentCount = maxConnect(row, col);
       if (board.at(row, col) == PieceType::Sente and currentCount == 5)
         return PieceType::Sente;
       if (board.at(row, col) == PieceType::Sente and currentCount > 5)
@@ -313,6 +324,220 @@ namespace GosFrontline
       board.set(row, col, PieceType::None);
 
       return (m > 5);
+    }
+
+    /// @brief Check if there is a genuine five.
+    /// @param row
+    /// @param col
+    /// @return Whether a genuine 5 exists in either direction of this position.
+    /// @note This function exists since there is a overrule law in the determination of rule violations.
+    /// I.E. when a violation and a 5 exist together, one side still wins.
+    bool hasFive(int row, int col) const
+    {
+      if (board.at(row, col) == PieceType::None)
+        return false;
+
+      for (size_t i = 0; i < 4; i++)
+      {
+        if (directionCount(row, col, static_cast<Direction>(i)) == 5)
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    int countLength(int row, int col, int length) const
+    {
+      if (board.at(row, col) == PieceType::None)
+      {
+        return 0;
+      }
+
+      int count = 0;
+      for (size_t i = 0; i < 4; i++)
+      {
+        count += static_cast<int>(directionCount(row, col, static_cast<Direction>(i)) == length);
+      }
+      return count;
+    }
+
+    int countThree(int row, int col) const
+    {
+      return countLength(row, col, 3);
+    }
+
+    int countFour(int row, int col) const
+    {
+      return countLength(row, col, 4);
+    }
+
+    int countLiveThree(int row, int col) const
+    {
+      if (board.at(row, col) == PieceType::None)
+      {
+        return 0;
+      }
+
+      int count = 0;
+      for (size_t i = 0; i < 4; i++)
+      {
+        count += static_cast<int>((directionCount(row, col, static_cast<Direction>(i)) == 3) and openDegree(row, col, static_cast<Direction>(i)) == 2);
+      }
+      return count;
+    }
+
+    bool isLong(int row, int col) const
+    {
+      if (hasFive(row, col))
+        return false;
+
+      for (size_t i = 0; i < 4; i++)
+      {
+        if (directionCount(row, col, static_cast<Direction>(i)) > 5)
+        {
+          return true;
+        }
+      }
+    }
+
+    bool violationAt(int row, int col)
+    {
+      if (board.at(row, col) == PieceType::Gote)
+      {
+        return false; // Gote can't make a violation.
+      }
+
+      if (board.at(row, col) != PieceType::None) // if it is already placed
+        return (countLiveThree(row, col) > 0) or // 33 and 334
+               (countFour(row, col) >= 2) or     // 44 and 344
+               (isLong(row, col));
+
+      else
+      {
+        board.set(row, col, PieceType::Sente);
+        bool result = violationAt(row, col);
+        board.set(row, col, PieceType::None);
+        return result;
+      } // if nothing is placed yet
+    }
+
+    bool violation(int row, int col)
+    {
+      bool empty_flag = false;
+      if (not(board.at(row, col) == PieceType::Sente))
+      {
+        board.set(row, col, PieceType::Sente);
+        empty_flag = true;
+      }
+
+      if (violationAt(row, col))
+      {
+        if (empty_flag)
+        {
+          board.set(row, col, PieceType::None);
+        }
+        return true;
+      }
+
+      // Must search all stones connected since this one move may cause a change in states of all stones connected
+      for (const auto &dir : directions)
+      {
+        int x = row + dir.first, y = col + dir.second;
+
+        // Traverse in the positive direction
+        while (board.validateCoords(x, y) && board.at(x, y) == PieceType::Sente)
+        {
+          if (violationAt(x, y))
+          {
+            if (empty_flag)
+            {
+              board.set(row, col, PieceType::None);
+            }
+            return true;
+          }
+          x += dir.first;
+          y += dir.second;
+        }
+
+        // Traverse in the negative direction
+        x = row - dir.first;
+        y = col - dir.second;
+        while (board.validateCoords(x, y) && board.at(x, y) == PieceType::Sente)
+        {
+          if (violationAt(x, y))
+          {
+            if (empty_flag)
+            {
+              board.set(row, col, PieceType::None);
+            }
+            return true;
+          }
+          x -= dir.first;
+          y -= dir.second;
+        }
+      }
+      if (empty_flag)
+      {
+        board.set(row, col, PieceType::None);
+      }
+      return false;
+    }
+
+    PieceType toMove() const
+    {
+      return static_cast<PieceType>(moveCount % 2 + 1);
+    }
+
+    /// @brief Make a move.
+    /// @param row
+    /// @param col
+    /// @return If the move was successfully made
+    /// @note This API is solely designated for a human player.
+    ///       If it is an algorithm, use protected function makeMoveEngine(row, col) instead.
+    bool makeMove(int row, int col)
+    {
+      if ((not board.validateCoords(row, col)) or board.at(row, col) != PieceType::None)
+      {
+        return false;
+      }
+
+      if (static_cast<int>(toMove()) == static_cast<int>(engine))
+      {
+        throw std::runtime_error("It is not your turn!");
+      }
+
+      if ((toMove() == PieceType::Sente) and violation(row, col))
+      {
+        return false;
+      }
+
+      recordMove(row, col);
+      board.set(row, col, toMove());
+      return true;
+    }
+
+  protected:
+    bool makeMoveEngine(int row, int col)
+    {
+      if ((not board.validateCoords(row, col)) or board.at(row, col) != PieceType::None)
+      {
+        return false;
+      }
+
+      if (static_cast<int>(toMove()) != static_cast<int>(engine))
+      {
+        throw std::runtime_error("Engine made move on wrong turn.");
+      }
+
+      if ((toMove() == PieceType::Sente) and violation(row, col))
+      {
+        return false;
+      }
+
+      recordMove(row, col);
+      board.set(row, col, toMove());
+      return true;
     }
   };
 

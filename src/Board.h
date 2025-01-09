@@ -1,7 +1,7 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-///@author Shane-Xue
+/// @author Shane-Xue
 
 #include <string>
 #include <stdexcept>
