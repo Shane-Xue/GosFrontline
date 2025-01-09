@@ -1,11 +1,13 @@
 #ifndef BOARD_H
 #define BOARD_H
 
-#include <vector>
-#include <utility>
+///@author Shane-Xue
+
+#include <string>
 #include <stdexcept>
 #include <type_traits>
-#include <string>
+#include <utility>
+#include <vector>
 
 namespace GosFrontline
 {
@@ -85,10 +87,19 @@ namespace GosFrontline
     /// @param row_param
     /// @param col_param
     /// @return element at this place
-    T at(size_t row_param, size_t col_param) const
+    T &at(size_t row_param, size_t col_param) const
     {
       return board.at(row_param).at(col_param);
     }
+
+    // /// @brief const version of at
+    // /// @param row_param
+    // /// @param col_param
+    // /// @return const T& value
+    // const T& at(size_t row_param, size_t col_param) const
+    // {
+    //   return board.at(row_param).at(col_param);
+    // }
 
     /// @brief set element at row_param, col_param
     /// @param row_param
@@ -153,6 +164,15 @@ namespace GosFrontline
                                "Consider possible misoperation performed on underlying Grid.");
       }
       return col;
+    }
+
+    /// @brief Check if given coordinates are valid.
+    /// @param row_param
+    /// @param col_param
+    /// @return true if valid, false otherwise
+    bool validateCoords(size_t row_param, size_t col_param) const
+    {
+      return row_param < row && col_param < col and row_param >= 0 && col_param >= 0;
     }
 
     /// @brief Count instances of @element in current board
