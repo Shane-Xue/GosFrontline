@@ -3,6 +3,7 @@
 
 /// @author Shane-Xue
 
+#include <cassert>
 #include <string>
 #include <stdexcept>
 #include <type_traits>
@@ -25,7 +26,7 @@ namespace GosFrontline
     Board() {};
 
     Board(size_t r, size_t c, T init_val = T()) : board(std::vector<std::vector<T>>(r, std::vector<T>(c, init_val))),
-                                                  col(c), row(r) {};
+                                                  col(c), row(r) {std::cout << "Board initialized with " << row << " rows and " << col << " columns." << std::endl;};
 
     // Copy and Move initializers and operator=
     Board(const Board &other) : board(other.board), col(other.col), row(other.row) {};
@@ -41,6 +42,8 @@ namespace GosFrontline
     Board(Board &&other) noexcept : col(other.col), row(other.row)
     {
       board = std::move(other.board);
+      row = other.row;
+      col = other.col;
       other.col = 0;
       other.row = 0;
     }
@@ -48,6 +51,8 @@ namespace GosFrontline
     Board operator=(Board &&other) noexcept
     {
       board = std::move(other.board);
+      row = other.row;
+      col = other.col;
       other.col = 0;
       other.row = 0;
       return *this;
@@ -87,7 +92,7 @@ namespace GosFrontline
     /// @param row_param
     /// @param col_param
     /// @return element at this place
-    T &at(size_t row_param, size_t col_param) const
+    const T &at(size_t row_param, size_t col_param) const
     {
       return board.at(row_param).at(col_param);
     }
@@ -135,7 +140,7 @@ namespace GosFrontline
     ///        It was designed for the purpose of easily reading and iterating
     ///        over the board, and const-ness grants some magnitude of safety.
     /// @return Reference to board.
-    const Grid &get_board()
+    const Grid &get_board() const
     {
       return board;
     }
@@ -160,6 +165,7 @@ namespace GosFrontline
     {
       if (board[0].size() != col)
       {
+        std::cerr << board[0].size() << " " << col << std::endl;
         throw std::logic_error("Predesignated column size is different from actual column size of board. "
                                "Consider possible misoperation performed on underlying Grid.");
       }

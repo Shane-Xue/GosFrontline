@@ -3,6 +3,7 @@
 
 ///@author Shane-Xue
 
+#include <cassert>
 #include <string>
 #include <thread>
 #include <utility>
@@ -12,12 +13,6 @@
 
 namespace GosFrontline
 {
-  enum class EngineStatus : int
-  {
-    Disabled = 0,
-    Sente = 1,
-    Gote = 2
-  };
   enum class PieceType : int
   {
     None = 0,
@@ -48,7 +43,7 @@ namespace GosFrontline
     using Move = std::tuple<int, int, PieceType>;
     GoBoard board;
     std::string senteName, goteName;
-    EngineStatus engine;
+    PieceType engine;
     int moveCount = 0; // Number of moves made, not current move number
     ViolationPolicy violationPolicy = ViolationPolicy::Strict;
     std::vector<Move> moves{};
@@ -143,11 +138,26 @@ namespace GosFrontline
       moveCount++;
     }
 
+    bool _undo_last()
+    {
+      if (moveCount == 0)
+      {
+        return false;
+      }
+      Move last = moves.back();
+      if (not(board.at(std::get<0>(last), std::get<1>(last)) == std::get<2>(last)))
+        throw std::runtime_error("Move log is corrupted");
+      moves.pop_back();
+      board.set(std::get<0>(last), std::get<1>(last), PieceType::None);
+      moveCount--;
+      return true;
+    }
+
   public:
     Gaming();
 
     // Initialize with board dimensions and player names
-    Gaming(int rows, int cols, const std::string &sente, const std::string &gote, EngineStatus engineStat = EngineStatus::Gote)
+    Gaming(int rows, int cols, const std::string &sente, const std::string &gote, PieceType engineStat = PieceType::Gote)
     {
       board = GoBoard(rows, cols, PieceType::None);
       senteName = sente;
@@ -156,7 +166,7 @@ namespace GosFrontline
     }
 
     // Initialize with board dimensions and engine status
-    Gaming(int rows, int cols, EngineStatus engineStat)
+    Gaming(int rows, int cols, PieceType engineStat)
     {
       board = GoBoard(rows, cols, PieceType::None);
       senteName = "Anonymous";
@@ -165,7 +175,7 @@ namespace GosFrontline
     }
 
     // Initialize with player names and engine status
-    Gaming(const std::string &sente, const std::string &gote, EngineStatus engineStat = EngineStatus::Gote)
+    Gaming(const std::string &sente, const std::string &gote, PieceType engineStat = PieceType::Gote)
     {
       board = GoBoard(standardSize, standardSize, PieceType::None); // Default board size
       senteName = sente;
@@ -179,7 +189,7 @@ namespace GosFrontline
       board = GoBoard(standardSize, standardSize, PieceType::None); // Default board size
       senteName = sente;
       goteName = gote;
-      engine = EngineStatus::Gote; // Default engine status
+      engine = PieceType::Gote; // Default engine status
     }
 
     /// @brief This does what its name says.
@@ -205,7 +215,7 @@ namespace GosFrontline
 
     /// @brief This does what its name says.
     /// @param status
-    void setEngineStatus(EngineStatus status)
+    void setEngineStatus(PieceType status)
     {
       engine = status;
     }
@@ -399,6 +409,7 @@ namespace GosFrontline
           return true;
         }
       }
+      return false;
     }
 
     bool violationAt(int row, int col)
@@ -424,6 +435,11 @@ namespace GosFrontline
 
     bool violation(int row, int col)
     {
+      if (toMove() == PieceType::Gote)
+      {
+        return false;
+      }
+      
       bool empty_flag = false;
       if (not(board.at(row, col) == PieceType::Sente))
       {
@@ -517,12 +533,41 @@ namespace GosFrontline
       return true;
     }
 
-  protected:
+    bool undo()
+    {
+      if (static_cast<int>(toMove()) == static_cast<int>(engine))
+      {
+        throw std::runtime_error("Engine seems to be too slow, or is undoing.");
+      }
+      if (engine == PieceType::None)
+      {
+        return _undo_last();
+      }
+      return (_undo_last() and _undo_last());
+    }
+
+    const std::vector<std::vector<PieceType>> &getBoard() const
+    {
+      return board.get_board();
+    }
+
+    int movesMade() const{
+      return moveCount;
+    }
+
+    bool isEmpty(int row, int col){
+      return board.at(row, col) == PieceType::None;
+    }
+
+    PieceType engineSide(){
+      return engine;
+    }
+
     bool makeMoveEngine(int row, int col)
     {
       if ((not board.validateCoords(row, col)) or board.at(row, col) != PieceType::None)
       {
-        return false;
+        throw std::runtime_error("Invalid move from engine.");
       }
 
       if (static_cast<int>(toMove()) != static_cast<int>(engine))
@@ -532,12 +577,19 @@ namespace GosFrontline
 
       if ((toMove() == PieceType::Sente) and violation(row, col))
       {
-        return false;
+        throw std::runtime_error("Engine made a violation move.");
       }
 
       recordMove(row, col);
       board.set(row, col, toMove());
       return true;
+    }
+
+    void clearBoard()
+    {
+      board = GoBoard(board.row_count(), board.col_count(), PieceType::None);
+      moves.clear();
+      moveCount = 0;
     }
   };
 
@@ -547,12 +599,12 @@ namespace GosFrontline
     board = GoBoard(standardSize, standardSize, PieceType::None);
     senteName = "Anonymous";
     goteName = "Gryffin Engine";
-    engine = EngineStatus::Gote;
+    engine = PieceType::Gote;
   }
 
-  Gaming::~Gaming()
-  {
-  }
+  // Gaming::~Gaming()
+  // {
+  // }
 
 } // namespace GosFrontline
 
