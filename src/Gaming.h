@@ -439,7 +439,7 @@ namespace GosFrontline
       {
         return false;
       }
-      
+
       bool empty_flag = false;
       if (not(board.at(row, col) == PieceType::Sente))
       {
@@ -551,15 +551,18 @@ namespace GosFrontline
       return board.get_board();
     }
 
-    int movesMade() const{
+    int movesMade() const
+    {
       return moveCount;
     }
 
-    bool isEmpty(int row, int col){
+    bool isEmpty(int row, int col) const
+    {
       return board.at(row, col) == PieceType::None;
     }
 
-    PieceType engineSide(){
+    PieceType engineSide()
+    {
       return engine;
     }
 
@@ -585,9 +588,20 @@ namespace GosFrontline
       return true;
     }
 
+    bool isValidCoord(int row, int col){
+      return board.validateCoords(row, col);
+    }
+
     void clearBoard()
     {
       board = GoBoard(board.row_count(), board.col_count(), PieceType::None);
+      moves.clear();
+      moveCount = 0;
+    }
+
+    void clearBoard(int row, int col)
+    {
+      board = GoBoard(row, col, PieceType::None);
       moves.clear();
       moveCount = 0;
     }

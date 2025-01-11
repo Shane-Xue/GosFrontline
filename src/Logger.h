@@ -73,7 +73,7 @@ GosFrontline::Logger::~Logger()
     m_file.close();
 }
 
-void GosFrontline::Logger::log(const std::string &message, MessageType type)
+void GosFrontline::Logger::log(const std::string &message, MessageType type = MessageType::INFO)
 {
     m_queue.push(std::to_string(std::chrono::system_clock::now().time_since_epoch().count() / 1000000) + " " + types[static_cast<int>(type)] + " | " + message);
 }

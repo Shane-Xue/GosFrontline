@@ -1,10 +1,12 @@
 # ignore vsc configurations
 .vscode/
+.VSCodeCounter/
 
 # Ignore Builds
 test_builds/
 *.exe
 *.o
+log/
 
 # Workflow Notes
 *.bkp

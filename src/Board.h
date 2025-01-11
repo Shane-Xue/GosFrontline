@@ -26,7 +26,7 @@ namespace GosFrontline
     Board() {};
 
     Board(size_t r, size_t c, T init_val = T()) : board(std::vector<std::vector<T>>(r, std::vector<T>(c, init_val))),
-                                                  col(c), row(r) {std::cout << "Board initialized with " << row << " rows and " << col << " columns." << std::endl;};
+                                                  col(c), row(r) {};
 
     // Copy and Move initializers and operator=
     Board(const Board &other) : board(other.board), col(other.col), row(other.row) {};
