@@ -75,6 +75,12 @@ GosFrontline::Logger::~Logger()
 
 void GosFrontline::Logger::log(const std::string &message, MessageType type = MessageType::INFO)
 {
+#ifndef DEBUG
+    if (type == MessageType::DEBUG)
+    {
+        return;
+    }
+#endif
     m_queue.push(std::to_string(std::chrono::system_clock::now().time_since_epoch().count() / 1000000) + " " + types[static_cast<int>(type)] + " | " + message);
 }
 

@@ -8,18 +8,19 @@
 #include "Backend.h"
 #include "Board.h"
 #include "Logger.h"
+#include "Utilities.h"
 
 // ANSI Escape Sequences
-#define RESET "\033[0m"
-#define BLACK "\033[30m"
-#define RED "\033[31m"
-#define GREEN "\033[32m"
-#define YELLOW "\033[33m"
-#define BLUE "\033[34m"
-#define MAGENTA "\033[35m"
-#define CYAN "\033[36m"
-#define WHITE "\033[37m"
-#define RGB(r, g, b) "\033[38;2;" #r ";" #g ";" #b "m"
+#define RESET "\e[0m"
+#define BLACK "\e[30m"
+#define RED "\e[31m"
+#define GREEN "\e[32m"
+#define YELLOW "\e[33m"
+#define BLUE "\e[34m"
+#define MAGENTA "\e[35m"
+#define CYAN "\e[36m"
+#define WHITE "\e[37m"
+#define RGB(r, g, b) "\e[38;2;" #r ";" #g ";" #b "m"
 
 namespace GosFrontline
 {
@@ -69,13 +70,17 @@ namespace GosFrontline
     void printBoard() const;
     void printMsg(const std::string &, Color) const;
     void quit();
+    void undo();
+    void save();
     std::pair<int, int> getNumbers(std::string);
-    std::string getInput(std::string prompt);
+    std::string getInput(std::string prompt, std::string fallback);
     void printBadInput() const;
 
     using Move = std::pair<int, int>;
     static const std::string welcome, menu_prompt, game_prompt, main_quit, bad_input, move_count, ask_board_size;
-    static const std::string default_size, game_over_prompt;
+    static const std::string default_size, game_over_prompt, filename_prompt_save, ask_side;
+    std::string save_location = "./saved_games";
+    std::string autosave_file = "autosave.gfl";
     static const int timeout; // millisecond timeout
     bool game_over;
     bool pve;
@@ -117,20 +122,24 @@ namespace GosFrontline
                                                 "Enter number as your choice:",
                     InterfaceCLI::game_prompt = "Enter your move: (row, column)\n"
                                                 "Or you can do the following by entering the corresponding letter\n"
-                                                "\033[4mQ\033[0muit without saving\n"
-                                                "Sa\033[4mv\033[0me and quit\n"
-                                                "\033[4mS\033[0mave Game\n"
-                                                "\033[4mE\033[0xit Program (Without Saving)]",
+                                                "\e[4mQ\e[0muit without saving\n"
+                                                "Sa\e[4mv\e[0me and quit\n"
+                                                "\e[4mS\e[0mave Game\n"
+                                                "\e[4mE\e[0mxit Program (Without Saving)\n"
+                                                "\e[4mU\e[0mndo last move\n",
                     InterfaceCLI::game_over_prompt = "Game is over. What do you want to do now?\n"
-                                                     "\033[4mQ\033[0muit to main menu\n"
-                                                     "\033[4mE\033[0xit Program (Without Saving)]",
+                                                     "\e[4mQ\e[0muit to main menu\n"
+                                                     "\e[4mE\e[0mxit Program (Without Saving)]\n",
                     InterfaceCLI::bad_input = "Invalid input! Please try again.",
                     InterfaceCLI::move_count = "Such was the board after move ",
                     InterfaceCLI::ask_board_size = "Please enter the size of the board in form (row col): (Press enter to default to 15*15 board)",
                     InterfaceCLI::default_size = "Did not get a valid input! Defaulting to 15*15\n",
+                    InterfaceCLI::filename_prompt_save = "Please enter the name of the file you wish to save to:"
+                                                         "\n(Entering nothing will result in saving to a default file, enter name to save to a custom file) ",
+                    InterfaceCLI::ask_side = "Which side would you like to play, \e[4mS\e[0mente or \e[4mG\e[0mote? ",
                     InterfaceCLI::main_quit = "Thank you for using this program! Hit any key to close this window.";
 
-  const std::regex InterfaceCLI::two_numbers(R"(\s+(\d+)\s+(\d+)\s+)");
+  const std::regex InterfaceCLI::two_numbers(R"(\s*(\d+)\s+(\d+)\s*)");
   const int InterfaceCLI::timeout = 10000;
 
   std::pair<int, int> InterfaceCLI::getNumbers(std::string input)
@@ -145,7 +154,7 @@ namespace GosFrontline
 
   void InterfaceCLI::clearScreen() const
   {
-    std::cout << "\033[2J\033[1;1H";
+    std::cout << "\e[2J\e[1;1H";
   }
 
   void InterfaceCLI::printWelcome() const
@@ -158,8 +167,24 @@ namespace GosFrontline
     std::cout << menu_prompt;
   }
 
-  std::string InterfaceCLI::getInput(std::string prompt)
+  std::string InterfaceCLI::getInput(std::string prompt, std::string fallback = "q")
   {
+    if (not std::cin.good())
+    {
+      if (std::cin.eof())
+      {
+        std::cout << "You entered Ctrl+Z.\n";
+        logger->log("Frontend recieved EOF. Frontend immediately aborting.");
+        quit();
+      }
+      else
+      {
+        std::cerr << "Error reading from stdin. Exiting." << std::endl;
+        logger->log("Error reading from stdin. Exiting.");
+      }
+      return fallback;
+    }
+
     std::cout << prompt;
     std::string input;
     std::getline(std::cin, input);
@@ -225,9 +250,78 @@ namespace GosFrontline
     }
   }
 
+  void InterfaceCLI::undo()
+  {
+    logger->log("Frontend requested an undo. Now trying undo.");
+#ifdef DEBUG
+    backend()
+        .frontendUndo()
+        .wait();
+#else
+    auto future_readiness = backend().frontendUndo().wait_for(std::chrono::milliseconds(timeout));
+    if (future_readiness != std::future_status::ready)
+    {
+      logger->log("Frontend failed to undo within timeout threshold. Aborting.", MessageType::FATAL);
+      printMsg("Sorry, the undo failed, we are aborting. Please contact support.", Color::Red);
+      quit();
+    }
+#endif
+  }
+
+  void InterfaceCLI::save()
+  {
+    logger->log("Frontend requested a save. Now trying save.");
+    auto input = getInput(filename_prompt_save);
+    if (not std::filesystem::exists(save_location))
+    {
+      std::filesystem::create_directory(save_location);
+    }
+    std::string file_path = save_location + std::string("/") + GosFrontline::sanitize_filename(input) + ".gfl";
+
+    logstream.str("");
+    logstream << "Saving to " << file_path << "";
+    logger->log(logstream.str());
+    logstream.str("");
+
+    if (std::filesystem::exists(file_path))
+    {
+      printMsg("File already exists. Overwrite?(y/n)", Color::Yellow);
+      logger->log("File already exists. Asking for client's choice.", MessageType::WARNING);
+      auto result = getInput("");
+      while (1)
+      {
+        if (result[0] == 'y')
+        {
+          printMsg("Overwriting file.", Color::Green);
+          logger->log("Client Chose to overwrite file.");
+          break;
+        }
+        else if (result[0] == 'n')
+        {
+          printMsg("You chose not to overwrite. Saving to autosave file.", Color::Yellow);
+          logger->log("Client Chose not to overwrite file. Writing to default autosave.", MessageType::WARNING);
+          file_path = save_location + std::string("/") + autosave_file;
+          return;
+        }
+      }
+    }
+
+    auto reply = backend().save(file_path);
+    auto response = reply.wait_for(std::chrono::milliseconds(timeout));
+    if (response == std::future_status::timeout)
+    {
+      printMsg("Sorry, the save failed, try again later.", Color::Red);
+      logger->log("Frontend failed to save within timeout threshold. Giving up on saving.", MessageType::WARNING);
+    }
+    else if (response == std::future_status::ready)
+    {
+      printMsg("Saved to " + file_path, Color::Green);
+    }
+  }
+
   void InterfaceCLI::printMsg(const std::string &msg, Color c = Color::Default) const
   {
-    const std::string ESCAPE_CODE_PREFIX = "\033[";
+    const std::string ESCAPE_CODE_PREFIX = "\e[";
     const std::string ESCAPE_CODE_SUFFIX = "m";
 
     switch (c)
@@ -262,12 +356,18 @@ namespace GosFrontline
       break;
     }
     std::cout << msg << std::endl;
-    std::cout << "\033[0m";
+    std::cout << "\e[0m";
   }
 
   void InterfaceCLI::run()
   {
     printWelcome();
+
+    logstream.str("");
+    logstream << "Frontend has been started. Now running on thread " << std::this_thread::get_id() << ".";
+    logger->log(logstream.str());
+    logstream.str("");
+
     std::string current_prompt = menu_prompt;
     while (not exit)
     {
@@ -287,9 +387,43 @@ namespace GosFrontline
         }
         std::string parameters = ""; // Will host any parameters needed
         std::pair<int, int> res;
+        std::string side = "NOTHING HERE";
+        bool engineFirst = false;
+        int ask_side_fail_count = 0;
         switch (select)
         {
         case 1:
+          while (true)
+          {
+            side = getInput(ask_side);
+            if (std::tolower(side[0]) == 's')
+            {
+              break;
+            }
+            else if (std::tolower(side[0]) == 'g')
+            {
+              engineFirst = true;
+              break;
+            }
+            else
+            {
+              if (ask_side_fail_count > 2)
+              {
+                printMsg("You gave wrong input too many times. Assume you want to play sente.");
+                logstream.str("");
+                logstream << "Got bad input for side selection: failed 3 times. Defaulting to sente.";
+                logger->log(logstream.str(), MessageType::WARNING);
+                logstream.str("");
+              }
+
+              logstream.str("");
+              logstream << "Got bad input for side selection: failed " << ++ask_side_fail_count << " times.";
+              logger->log(logstream.str(), MessageType::WARNING);
+              logstream.str("");
+
+              printMsg("Oops, don't know what you mean... Which side do you want to play?");
+            }
+          }
           parameters = getInput(ask_board_size);
           res = getNumbers(parameters);
           if (res != std::pair<int, int>(-1, -1))
@@ -305,8 +439,15 @@ namespace GosFrontline
             logger->log("Got bad input for board size. Defaulting to default board size.", MessageType::WARNING);
             backend().newGame();
           }
+          clearScreen();
           printMsg("Let's get the show on the road!", Color::Cyan);
           game_over = false;
+          if (engineFirst)
+          {
+            backend().reverseSides();
+            backend().callEngine();
+          }
+          
           printBoard();
           position = CurrentState::InGame;
           current_prompt = game_prompt;
@@ -331,6 +472,7 @@ namespace GosFrontline
       }
       else if (position == CurrentState::InGame)
       {
+        // printBoard();
         std::pair<int, int> res = getNumbers(input);
         if (res != std::pair<int, int>(-1, -1))
         {
@@ -358,8 +500,7 @@ namespace GosFrontline
             reply = result_future.wait_for(std::chrono::milliseconds(timeout));
 #else
           auto reply = result_future.wait_for(std::chrono::milliseconds(timeout));
-#endif
-#ifndef DEBUG
+
           if (reply == std::future_status::timeout)
           {
             printMsg("Backend timed out! Please contact support.", Color::Red);
@@ -368,13 +509,16 @@ namespace GosFrontline
           }
           else
 #endif
-              if (reply == std::future_status::ready)
+          if (reply == std::future_status::ready)
           {
             auto [status, move_count] = result_future.get();
             if (status == GosFrontline::MoveReply::Win)
             {
               game_over = true;
               logger->log("Human user won the game.");
+              clearScreen();
+              printMsg("Move successful!");
+              printBoard();
               printMsg("Congrats! You won the game!");
               current_prompt = game_over_prompt;
             }
@@ -488,6 +632,18 @@ namespace GosFrontline
           case 'e':
           case 'E':
             quit();
+            break;
+          case 's':
+          case 'S':
+            save();
+            printBoard();
+            break;
+          case 'u':
+          case 'U':
+            undo();
+            printBoard();
+
+            break;
           default:
             printBadInput();
             break;

@@ -23,6 +23,31 @@ namespace GosFrontline
       condition.notify_one();
     }
 
+    /// @brief Pushing an item to the front of the queue
+    /// @param item
+    /// @warning DO NOT USE THIS FUNCTION UNLESS YOU KNOW WHAT YOU ARE DOING.
+    ///          THIS IS NOT A DEQUE!
+    void _push_front(const T &item)
+    {
+      std::lock_guard<std::mutex> lock(mutex);
+      T dump;
+      std::queue<T> temp_dump;
+      while (not queue.empty())
+      {
+        dump = queue.front();
+        queue.pop();
+        temp_dump.push(dump);
+      }
+      queue.push(item);
+      while (not temp_dump.empty())
+      {
+        dump = temp_dump.front();
+        temp_dump.pop();
+        queue.push(dump);
+      }
+      condition.notify_one();
+    }
+
     // void push(const T &&item)
     // {
     //   std::lock_guard<std::mutex> lock(mutex);

@@ -556,6 +556,19 @@ namespace GosFrontline
       return board.get_board();
     }
 
+    const std::vector<Move> &getSequence() const
+    {
+      return moves;
+    }
+
+    std::string getSenteName() const{
+      return senteName;
+    }
+
+    std::string getGoteName() const{
+      return goteName;
+    }
+
     int movesMade() const
     {
       return moveCount;
