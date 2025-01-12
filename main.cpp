@@ -1,9 +1,12 @@
+#define DEBUG DEBUG
+
 #include <bits/stdc++.h>
 #include <memory>
 
 #include "src/Interface.h"
 #include "src/Backend.h"
 #include "src/Logger.h"
+
 // using namespace std;
 
 int main()

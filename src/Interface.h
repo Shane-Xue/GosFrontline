@@ -75,8 +75,9 @@ namespace GosFrontline
 
     using Move = std::pair<int, int>;
     static const std::string welcome, menu_prompt, game_prompt, main_quit, bad_input, move_count, ask_board_size;
-    static const std::string default_size;
+    static const std::string default_size, game_over_prompt;
     static const int timeout; // millisecond timeout
+    bool game_over;
     bool pve;
 
     static const std::regex two_numbers;
@@ -118,14 +119,18 @@ namespace GosFrontline
                                                 "Or you can do the following by entering the corresponding letter\n"
                                                 "\033[4mQ\033[0muit without saving\n"
                                                 "Sa\033[4mv\033[0me and quit\n"
-                                                "\033[4mS\033[0mave Game\n",
+                                                "\033[4mS\033[0mave Game\n"
+                                                "\033[4mE\033[0xit Program (Without Saving)]",
+                    InterfaceCLI::game_over_prompt = "Game is over. What do you want to do now?\n"
+                                                     "\033[4mQ\033[0muit to main menu\n"
+                                                     "\033[4mE\033[0xit Program (Without Saving)]",
                     InterfaceCLI::bad_input = "Invalid input! Please try again.",
                     InterfaceCLI::move_count = "Such was the board after move ",
                     InterfaceCLI::ask_board_size = "Please enter the size of the board in form (row col): (Press enter to default to 15*15 board)",
                     InterfaceCLI::default_size = "Did not get a valid input! Defaulting to 15*15\n",
                     InterfaceCLI::main_quit = "Thank you for using this program! Hit any key to close this window.";
 
-  const std::regex InterfaceCLI::two_numbers((R"((\d+)\s+(\d+))"));
+  const std::regex InterfaceCLI::two_numbers(R"(\s+(\d+)\s+(\d+)\s+)");
   const int InterfaceCLI::timeout = 10000;
 
   std::pair<int, int> InterfaceCLI::getNumbers(std::string input)
@@ -171,12 +176,12 @@ namespace GosFrontline
   {
     std::cout << main_quit;
     logger->log("Frontend recieved exit signal. Frontend cleaning up.");
-    while (std::cin.peek() == std::char_traits<char>::eof())
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // while (std::cin.peek() == std::char_traits<char>::eof())
+    //   std::this_thread::sleep_for(std::chrono::milliseconds(100));
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     exit = true;
     backend().quit();
-    logger->log("Frontend has alerted the backend to end. Now exiting.");
+    logger->log("Frontend has alerted the backend to end. Frontend now exiting.");
   }
 
   void InterfaceCLI::printBadInput() const
@@ -269,7 +274,17 @@ namespace GosFrontline
       std::string input = getInput(current_prompt);
       if (position == CurrentState::MainMenu)
       {
-        int select = std::stoi(input);
+        int select;
+        try
+        {
+          select = std::stoi(input);
+        }
+        catch (std::invalid_argument &e)
+        {
+          printBadInput();
+          logger->log(std::string("Got bad input for menu selection: ") + input, MessageType::WARNING);
+          continue;
+        }
         std::string parameters = ""; // Will host any parameters needed
         std::pair<int, int> res;
         switch (select)
@@ -290,6 +305,8 @@ namespace GosFrontline
             logger->log("Got bad input for board size. Defaulting to default board size.", MessageType::WARNING);
             backend().newGame();
           }
+          printMsg("Let's get the show on the road!", Color::Cyan);
+          game_over = false;
           printBoard();
           position = CurrentState::InGame;
           current_prompt = game_prompt;
@@ -317,29 +334,55 @@ namespace GosFrontline
         std::pair<int, int> res = getNumbers(input);
         if (res != std::pair<int, int>(-1, -1))
         {
+          if (game_over)
+          {
+            printMsg("Game is over! You cannot make a move anymore.", Color::Yellow);
+            logger->log("User tried to make a move after game was over.", MessageType::WARNING);
+            continue;
+          }
+
           int row = res.first - 1;
           int col = res.second - 1;
           std::future<std::pair<GosFrontline::MoveReply, int>> result_future = backend().frontendMove(row, col);
+          printMsg("Processing your move... Please be patient.");
 
           logstream.str("");
           logstream << "User moved to " << row << ", " << col << ". Awaiting backend reply.";
           logger->log(logstream.str());
           logstream.str("");
 
+#ifdef DEBUG
           auto reply = result_future.wait_for(std::chrono::milliseconds(timeout));
+
+          while (reply != std::future_status::ready)
+            reply = result_future.wait_for(std::chrono::milliseconds(timeout));
+#else
+          auto reply = result_future.wait_for(std::chrono::milliseconds(timeout));
+#endif
+#ifndef DEBUG
           if (reply == std::future_status::timeout)
           {
             printMsg("Backend timed out! Please contact support.", Color::Red);
             logger->log("Backend timed out while trying to log user move. Now exiting.", MessageType::FATAL);
             quit();
           }
-          else if (reply == std::future_status::ready)
+          else
+#endif
+              if (reply == std::future_status::ready)
           {
             auto [status, move_count] = result_future.get();
-            if (status == GosFrontline::MoveReply::Success)
+            if (status == GosFrontline::MoveReply::Win)
+            {
+              game_over = true;
+              logger->log("Human user won the game.");
+              printMsg("Congrats! You won the game!");
+              current_prompt = game_over_prompt;
+            }
+            else if (status == GosFrontline::MoveReply::Success)
             {
               clearScreen();
               printMsg("Move successful!");
+              printBoard();
 
               logstream.str("");
               logstream << "Backend Move successful.";
@@ -348,7 +391,7 @@ namespace GosFrontline
 
               if (pve)
               {
-                printMsg("The AI is making its move... Press q to exit the game without saving.");
+                printMsg("The AI is making its move...");
                 logger->log("User is playing against the Engine. The Engine is now making its move.", MessageType::INFO);
                 auto signal = backend().callEngine();
                 bool exit = false, got_signal = false;
@@ -386,7 +429,7 @@ namespace GosFrontline
                     exit = true;
                     quit();
                   }
-                  
+
                   // std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
                 got_signal = true;
@@ -425,6 +468,7 @@ namespace GosFrontline
 
                 break;
               } // switch
+              printBoard();
             } // else
           } // reply status
         } // res != -1
@@ -436,10 +480,14 @@ namespace GosFrontline
           //   backend().frontendUndo();
           //   break;
           case 'q':
+          case 'Q':
             current_prompt = menu_prompt;
             position = CurrentState::MainMenu;
             clearScreen();
             break;
+          case 'e':
+          case 'E':
+            quit();
           default:
             printBadInput();
             break;

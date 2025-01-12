@@ -84,6 +84,10 @@ namespace GosFrontline
         Ynow -= directions[d].second;
       }
 
+#ifdef DEBUG
+      std::cout << count;
+#endif
+
       return count;
     }
 
@@ -283,6 +287,7 @@ namespace GosFrontline
         return ((hasFive(row, col)) ? (PieceType::Sente) : (PieceType::Gote));
       if (board.at(row, col) == PieceType::Gote and currentCount >= 5)
         return PieceType::Gote;
+      return PieceType::None;
     }
 
     bool willBe(int row, int col, PieceType tp, int length)
@@ -420,7 +425,7 @@ namespace GosFrontline
       }
 
       if (board.at(row, col) != PieceType::None) // if it is already placed
-        return (countLiveThree(row, col) > 0) or // 33 and 334
+        return (countLiveThree(row, col) > 1) or // 33 and 334
                (countFour(row, col) >= 2) or     // 44 and 344
                (isLong(row, col));
 
@@ -528,8 +533,8 @@ namespace GosFrontline
         return false;
       }
 
-      recordMove(row, col);
       board.set(row, col, toMove());
+      recordMove(row, col);
       return true;
     }
 
@@ -583,12 +588,13 @@ namespace GosFrontline
         throw std::runtime_error("Engine made a violation move.");
       }
 
-      recordMove(row, col);
       board.set(row, col, toMove());
+      recordMove(row, col);
       return true;
     }
 
-    bool isValidCoord(int row, int col){
+    bool isValidCoord(int row, int col)
+    {
       return board.validateCoords(row, col);
     }
 
@@ -619,6 +625,19 @@ namespace GosFrontline
   // Gaming::~Gaming()
   // {
   // }
+
+  PieceType Opposite(PieceType piece)
+  {
+    if (piece == PieceType::None)
+    {
+      return piece;
+    }
+    if ((piece == PieceType::Sente))
+    {
+      return PieceType::Gote;
+    }
+    return PieceType::Sente;
+  }
 
 } // namespace GosFrontline
 

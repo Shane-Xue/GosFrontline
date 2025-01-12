@@ -18,6 +18,7 @@ namespace GosFrontline
   enum class MoveReply
   {
     Success,
+    Win,
     Violation,
     WrongTurn,
     InvalidLocation,
@@ -93,6 +94,7 @@ namespace GosFrontline
     std::future<BoardAndStep> getBoard();
     std::pair<MoveReply, int> getMoveReply();
     bool boardUpdated();
+    std::future<void> checkWin();
 
     // Logging
     void setLogger(std::shared_ptr<Logger>);
@@ -176,6 +178,12 @@ std::pair<GosFrontline::MoveReply, int> GosFrontline::Backend::registerHumanMove
   {
     return std::make_pair(MoveReply::UnknownError, game.movesMade() + 1);
   }
+  // Game move should already have been made. Check if it is a winning move.
+  if (game.checkCurrentWin(row, col) == Opposite(game.toMove()))
+  {
+    return std::make_pair(MoveReply::Win,game.movesMade());
+  }
+  
 
   // enqueueBoard();
   return std::make_pair(MoveReply::Success, game.movesMade()); // Move was made, movesMade was implicitly updated
