@@ -10,6 +10,7 @@
 #include <filesystem>
 
 #include "Gaming.h"
+#include "Utilities.h"
 #include "SafeQueue.h"
 #include "Logger.h"
 #include "MCTS.h"
@@ -44,11 +45,13 @@ namespace GosFrontline
       Undo,
       Quit,
       GetBoard,
-      GetBoardAndSequence,
+      GetGame,
+      GetEngineStatus,
       SetEngineStatus,
       SetEngineStatusOff,
       Save,
       NewGame,
+      LoadGame,
       SetSenteName,
       SetGoteName,
       SetViolationPolicy,
@@ -65,9 +68,10 @@ namespace GosFrontline
     SafeQueue<std::tuple<int, int, PromiseWrapper<void>>> todo_move_engine;                      // Inwards Queue
     SafeQueue<PromiseWrapper<BoardAndStep>> boards;                                              // Outwards Queue
     SafeQueue<std::pair<MoveReply, int>> move_replies;                                           // Deprecated Queue
-    SafeQueue<std::pair<Action, PromiseWrapper<void>>> todo_actions;
+    SafeQueue<std::pair<Action, PromiseWrapper<bool>>> todo_actions;
     SafeQueue<std::pair<std::filesystem::path, PromiseWrapper<void>>> todo_save;
-    SafeQueue<PromiseWrapper<BoardAndSequence>> board_and_sequences;
+    SafeQueue<std::pair<std::filesystem::path, PromiseWrapper<bool>>> todo_load;
+    SafeQueue<PromiseWrapper<Gaming>> game_copies;
 
     std::stringstream log_stream;
 
@@ -78,6 +82,7 @@ namespace GosFrontline
     std::pair<GosFrontline::MoveReply, int> registerEngineMove(int, int);
 
     void boardSaver(std::filesystem::path);
+    Gaming boardLoader(std::filesystem::path);
 
     static const int default_size = 15;
     int rows = default_size, cols = default_size;
@@ -92,19 +97,20 @@ namespace GosFrontline
 
     // Actions
     std::future<MoveAndStep> frontendMove(int row, int col);
-    std::future<void> frontendUndo();
+    std::future<bool> frontendUndo();
     void engineMove(int row, int col, PromiseWrapper<void> status);
-    std::future<void> callEngine();
+    std::future<bool> callEngine();
     std::future<void> save(std::string);
     void reverseSides();
     void newGame(int row, int col);
+    std::future<bool> loadGame(std::string);
     void quit();
     PieceType tomove();
 
     // Getters
     std::future<BoardAndStep> getBoard();
     // std::pair<MoveReply, int> getMoveReply();
-    std::future<BoardAndSequence> getBoardAndSequence();
+    std::future<Gaming> getGame();
     bool boardUpdated();
     std::future<void> checkWin();
 
@@ -131,10 +137,10 @@ std::future<GosFrontline::Backend::MoveAndStep> GosFrontline::Backend::frontendM
   return ready_future;
 }
 
-std::future<void> GosFrontline::Backend::frontendUndo()
+std::future<bool> GosFrontline::Backend::frontendUndo()
 {
-  PromiseWrapper<void> ready = std::make_shared<std::promise<void>>();
-  std::future<void> ready_future = ready->get_future();
+  PromiseWrapper<bool> ready = std::make_shared<std::promise<bool>>();
+  std::future<bool> ready_future = ready->get_future();
   todo_actions.push(std::make_pair(Action::Undo, ready));
   todo.push(Action::Undo);
   return ready_future;
@@ -167,13 +173,13 @@ std::future<std::pair<std::vector<std::vector<GosFrontline::PieceType>>, int>> G
   return ready_future;
 }
 
-std::future<GosFrontline::Backend::BoardAndSequence> GosFrontline::Backend::getBoardAndSequence()
+std::future<GosFrontline::Gaming> GosFrontline::Backend::getGame()
 {
-  auto ready = std::make_shared<std::promise<BoardAndSequence>>();
-  std::future<BoardAndSequence> ready_future = ready->get_future();
-  board_and_sequences.push(ready);
-  todo.push(Action::GetBoardAndSequence);
-  logger->log("Logged in Action::GetBoardAndSequence.");
+  auto ready = std::make_shared<std::promise<GosFrontline::Gaming>>();
+  std::future<GosFrontline::Gaming> ready_future = ready->get_future();
+  GosFrontline::Backend::game_copies.push(ready);
+  GosFrontline::Backend::todo.push(Action::GetGame);
+  logger->log("Logged in Action::GetGame.");
   return ready_future;
 }
 
@@ -251,9 +257,19 @@ void GosFrontline::Backend::newGame(int r = default_size, int c = default_size)
   logger->log("Logged in Action::NewGame.");
 }
 
-std::future<void> GosFrontline::Backend::callEngine()
+std::future<bool> GosFrontline::Backend::loadGame(std::string filename)
 {
-  auto ready = std::make_shared<std::promise<void>>();
+  auto ready = std::make_shared<std::promise<bool>>();
+  auto ready_future = ready->get_future();
+  todo_load.push(std::make_pair(filename, ready));
+  todo.push(Action::LoadGame);
+  logger->log("Logged in Action::Load.");
+  return ready_future;
+}
+
+std::future<bool> GosFrontline::Backend::callEngine()
+{
+  auto ready = std::make_shared<std::promise<bool>>();
   auto ready_future = ready->get_future();
   todo_actions.push(std::make_pair(Action::CallEngine, ready));
   todo.push(GosFrontline::Backend::Action::CallEngine);
@@ -265,7 +281,7 @@ std::future<void> GosFrontline::Backend::save(std::string filename)
 {
   auto ready = std::make_shared<std::promise<void>>();
   auto ready_future = ready->get_future();
-  todo_save.push(std::make_pair(filename, ready));
+  todo_save.push(std::make_pair(std::filesystem::path(filename), ready));
   todo.push(Action::Save);
   logger->log("Logged in Action::Save.");
   return ready_future;
@@ -291,20 +307,25 @@ void GosFrontline::Backend::boardSaver(std::filesystem::path p)
     logger->log("Failed to open file for saving. Giving up save.", MessageType::WARNING);
     return;
   } // Silent fail
-  std::string sente = game.getSenteName(), gote = game.getGoteName();
-  auto board_future = getBoardAndSequence();
+  auto board_future = getGame();
   auto result = board_future.wait_for(std::chrono::seconds(60));
   if (result == std::future_status::timeout)
   {
     logger->log("Failed to get board from backend. Giving up save.", MessageType::WARNING);
     return;
   }
-  auto board_and_sequence = board_future.get();
-  auto board = board_and_sequence.first;
-  auto sequence = board_and_sequence.second;
+  auto now_game = board_future.get();
+  std::string sente = now_game.getSenteName(), gote = now_game.getGoteName();
+  auto board = now_game.getBoard();
+  auto sequence = now_game.getSequence();
+  auto engine_status = now_game.engineSide();
   logger->log("Acquired adequate resources. Saving board to file.", MessageType::INFO);
   out << "Sente: " << sente << "\nGote: " << gote << "\n";
   out << "Time: " << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count() << "\n";
+  out << "Engine Status: " << ((engine_status == PieceType::None) ? ("Disabled") : (((engine_status == PieceType::Sente) ? ("Sente") : ("Gote"))))
+      << std::endl;
+  out << "Board Parameters: " << now_game.row_count() << "*" << now_game.col_count() << std::endl;
+
   for (auto &&row : board)
   {
     for (auto &&item : row)
@@ -333,9 +354,115 @@ void GosFrontline::Backend::boardSaver(std::filesystem::path p)
   return;
 }
 
+GosFrontline::Gaming GosFrontline::Backend::boardLoader(std::filesystem::path filename)
+{
+  if (not std::filesystem::exists(filename))
+    throw std::runtime_error("File does not exist.");
+  std::string result = GosFrontline::read_entire_file(filename.string()); // The entire file.
+
+  // Regexes used for matching
+  std::smatch match_cache;
+  std::regex sente_r(R"(Sente:\s*(.*))");
+  std::regex gote_r(R"(^Gote:\s*(.*)$)", std::regex_constants::ECMAScript | std::regex_constants::multiline);
+  std::regex engine_r(R"(Engine Status:\s*(Sente|Gote|Disabled))");
+  std::regex board_params_r(R"(^Board Parameters:\s*(\d+)\*(\d+)$)", std::regex_constants::ECMAScript | std::regex_constants::multiline);
+
+  std::regex_search(result, match_cache, gote_r);
+  std::string gote = match_cache[1];
+  std::regex_search(result, match_cache, sente_r);
+  std::string sente = match_cache[1];
+  std::regex_search(result, match_cache, engine_r);
+  GosFrontline::PieceType
+      engine_status =
+          (match_cache[1] == "Disabled")
+              ? (GosFrontline::PieceType::None)
+              : (((match_cache[1] == "Sente")
+                      ? (GosFrontline::PieceType::Sente)
+                      : (GosFrontline::PieceType::Gote)));
+  int rows, cols;
+  std::regex_search(result, match_cache, board_params_r);
+  try
+  {
+    rows = std::stoi(match_cache[1]);
+    cols = std::stoi(match_cache[2]);
+  }
+  catch (std::invalid_argument &e)
+  {
+    throw std::runtime_error("Invalid board parameters.");
+  }
+
+  std::stringstream regex_processor("");
+  regex_processor << "^(?:[ @O]){" << cols << "}$";
+  // std::string reg = regex_processor.str();
+  std::regex board_r(regex_processor.str(), std::regex_constants::ECMAScript | std::regex_constants::multiline),
+      move_r(R"((\d+)\s+(\d+)\s+(Sente|Gote)\s*\n)");
+
+  auto board_begin = std::sregex_iterator(result.begin(), result.end(), board_r);
+  auto board_end = std::sregex_iterator();
+
+  std::vector<std::vector<GosFrontline::PieceType>> board(rows, std::vector<GosFrontline::PieceType>(cols, GosFrontline::PieceType::None));
+
+  int row = 0;
+  int stone_count = 0;
+  for (std::sregex_iterator i = board_begin; i != board_end && row < rows; ++i, ++row)
+  {
+    std::string line = (*i)[0].str();
+    for (int col = 0; col < cols && col < line.size(); ++col)
+    {
+      char ch = line[col];
+      if (ch == ' ')
+        continue;
+      else if (ch == '@')
+        board[row][col] = GosFrontline::PieceType::Sente;
+      else if (ch == 'O')
+        board[row][col] = GosFrontline::PieceType::Gote;
+      stone_count++;
+    }
+  }
+
+  std::vector<std::tuple<int, int, GosFrontline::PieceType>> sequence;
+  auto move_begin = std::sregex_iterator(result.begin(), result.end(), move_r);
+  auto move_end = std::sregex_iterator();
+
+  for (std::sregex_iterator i = move_begin; i != move_end; ++i)
+  {
+    int x = std::stoi((*i)[1].str());
+    int y = std::stoi((*i)[2].str());
+    sequence.push_back(std::make_tuple(x, y, (((*i)[3].str() == "Sente") ? (GosFrontline::PieceType::Sente) : (GosFrontline::PieceType::Gote))));
+  }
+
+  // Verify Validity of board
+  if (stone_count != sequence.size())
+  {
+    throw std::runtime_error("Invalid board: Moving sequence did not agree with board on stone count. Please check the file.");
+  }
+
+  for (auto &&entry : sequence)
+  {
+    if (board[std::get<0>(entry)][std::get<1>(entry)] != std::get<2>(entry))
+    {
+      log_stream.str("");
+      log_stream << "Invalid board: Moving sequence did not agree with board on stone type at "
+                 << std::get<0>(entry) << ", " << std::get<1>(entry) << ". Please check the file.";
+      std::string error_msg = log_stream.str();
+      log_stream.str("");
+      throw std::runtime_error(error_msg);
+    }
+  }
+
+  // Create the game object and return
+  return GosFrontline::Gaming(rows, cols, board, sequence, sente, gote, engine_status);
+}
+
 int GosFrontline::Backend::run()
 {
   game.clearBoard();
+
+  log_stream.str("");
+  log_stream << "Backend initiated. Running on thread " << std::this_thread::get_id() << ".";
+  logger->log(log_stream.str());
+  log_stream.str("");
+
   while (true)
   {
     if (todo.empty())
@@ -400,12 +527,12 @@ int GosFrontline::Backend::run()
       lock.unlock();
       break;
     }
-    case Action::GetBoardAndSequence:
+    case Action::GetGame:
     {
       std::unique_lock<std::recursive_mutex> lock(game_mutex);
-      std::shared_ptr<std::promise<GosFrontline::Backend::BoardAndSequence>> board = board_and_sequences.pop();
-      logger->log("Preparing the board and sequence.");
-      board->set_value(std::make_pair(game.getBoard(), game.getSequence()));
+      std::shared_ptr<std::promise<GosFrontline::Gaming>> board = game_copies.pop();
+      logger->log("Preparing the copy of the game.");
+      board->set_value(game);
       lock.unlock();
       break;
     }
@@ -416,6 +543,28 @@ int GosFrontline::Backend::run()
                   { boardSaver(save_info.first); })
           .detach();
       save_info.second->set_value();
+      break;
+    }
+    case Action::LoadGame:
+    {
+      auto thisPromise = todo_load.pop();
+      try
+      {
+        game = boardLoader(thisPromise.first.string());
+      }
+      catch (std::runtime_error &e)
+      {
+        thisPromise.second->set_value(false);
+        logger->log("Failed to load game.");
+        logger->log(e.what(), MessageType::ERROR);
+        break;
+      }
+      if (game.toMove() == game.engineSide())
+      {
+        todo._push_front(Action::CallEngine);
+      }
+
+      thisPromise.second->set_value(true);
       break;
     }
     case Action::CallEngine:
@@ -450,12 +599,12 @@ int GosFrontline::Backend::run()
       auto status = game.undo();
       if ((not status) and (game.toMove() == game.engineSide()))
       {
-          todo._push_front(Action::CallEngine);
-          PromiseWrapper<void> promise;
-          todo_actions.push(std::make_pair(Action::CallEngine, promise));
-          logger->log("Engine must do first move. Pushed in Action::CallEngine.");
+        todo._push_front(Action::CallEngine);
+        PromiseWrapper<bool> promise;
+        todo_actions.push(std::make_pair(Action::CallEngine, promise));
+        logger->log("Engine must do first move. Pushed in Action::CallEngine.");
       }
-      
+
       auto thisPromise = todo_actions.pop();
       SafeQueue<decltype(thisPromise)> promises_cache;
       while (thisPromise.first != Action::Undo)
@@ -475,7 +624,7 @@ int GosFrontline::Backend::run()
         todo_actions.push(temp);
       }
 
-      thisPromise.second->set_value();
+      thisPromise.second->set_value(true);
       break;
     }
     case Action::Quit:

@@ -41,6 +41,7 @@ namespace GosFrontline
     using GoBoard = Board<PieceType>;
     using Shift = std::pair<int, int>;
     using Move = std::tuple<int, int, PieceType>;
+    
     GoBoard board;
     std::string senteName, goteName;
     PieceType engine;
@@ -196,6 +197,23 @@ namespace GosFrontline
       engine = PieceType::Gote; // Default engine status
     }
 
+    Gaming(int r, int c, std::vector<std::vector<PieceType>> b, std::vector<Move> ms, std::string s, std::string g, PieceType e = PieceType::Gote){
+      if (b.size() != r or b[0].size() != c) throw std::invalid_argument("Invalid board size");
+      board = GoBoard(r, c, PieceType::None);
+      for (int i = 0; i < r; i++)
+      {
+        for (int j = 0; j < c; j++)
+        {
+          board.set(i, j, b[i][j]);
+        }
+      }
+      moves = ms;
+      moveCount = ms.size();
+      senteName = s;
+      goteName = g;
+      engine = e; 
+    }
+
     /// @brief This does what its name says.
     /// @param policy
     void setViolationPolicy(ViolationPolicy policy)
@@ -231,6 +249,11 @@ namespace GosFrontline
     {
       senteName = sente;
       goteName = gote;
+    }
+
+    void swapNames()
+    {
+      std::swap(senteName, goteName);
     }
 
     /// @brief Max number of connected stones in all four directions
@@ -510,6 +533,16 @@ namespace GosFrontline
       return static_cast<PieceType>(moveCount % 2 + 1);
     }
 
+    size_t col_count() const
+    {
+      return board.col_count();
+    }
+
+    size_t row_count() const
+    {
+      return board.row_count();
+    }
+
     /// @brief Make a move.
     /// @param row
     /// @param col
@@ -561,11 +594,13 @@ namespace GosFrontline
       return moves;
     }
 
-    std::string getSenteName() const{
+    std::string getSenteName() const
+    {
       return senteName;
     }
 
-    std::string getGoteName() const{
+    std::string getGoteName() const
+    {
       return goteName;
     }
 

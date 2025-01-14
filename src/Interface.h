@@ -72,6 +72,7 @@ namespace GosFrontline
     void quit();
     void undo();
     void save();
+    bool readGame();
     std::pair<int, int> getNumbers(std::string);
     std::string getInput(std::string prompt, std::string fallback);
     void printBadInput() const;
@@ -114,11 +115,11 @@ namespace GosFrontline
                                             "(c) Shane Xue 2024-2025\n",
                     InterfaceCLI::menu_prompt = "What do you want to do?\n"
                                                 "1. Play PVE\n"
-                                                "2. Play PVP\n"
-                                                "3. Load Existing Game\n"
-                                                "4. View Help\n"
-                                                "5. Renju Rules\n"
-                                                "6. Exit\n"
+                                                // "2. Play PVP\n"
+                                                "2. Load Existing Game\n"
+                                                // "4. View Help\n"
+                                                // "5. Renju Rules\n"
+                                                "3. Exit\n"
                                                 "Enter number as your choice:",
                     InterfaceCLI::game_prompt = "Enter your move: (row, column)\n"
                                                 "Or you can do the following by entering the corresponding letter\n"
@@ -129,7 +130,7 @@ namespace GosFrontline
                                                 "\e[4mU\e[0mndo last move\n",
                     InterfaceCLI::game_over_prompt = "Game is over. What do you want to do now?\n"
                                                      "\e[4mQ\e[0muit to main menu\n"
-                                                     "\e[4mE\e[0mxit Program (Without Saving)]\n",
+                                                     "\e[4mE\e[0mxit Program (Without Saving)\n",
                     InterfaceCLI::bad_input = "Invalid input! Please try again.",
                     InterfaceCLI::move_count = "Such was the board after move ",
                     InterfaceCLI::ask_board_size = "Please enter the size of the board in form (row col): (Press enter to default to 15*15 board)",
@@ -139,7 +140,7 @@ namespace GosFrontline
                     InterfaceCLI::ask_side = "Which side would you like to play, \e[4mS\e[0mente or \e[4mG\e[0mote? ",
                     InterfaceCLI::main_quit = "Thank you for using this program! Hit any key to close this window.";
 
-  const std::regex InterfaceCLI::two_numbers(R"(\s*(\d+)\s+(\d+)\s*)");
+  const std::regex InterfaceCLI::two_numbers(R"(\s*(\d+)\s+(\d+).*)");
   const int InterfaceCLI::timeout = 10000;
 
   std::pair<int, int> InterfaceCLI::getNumbers(std::string input)
@@ -188,6 +189,7 @@ namespace GosFrontline
     std::cout << prompt;
     std::string input;
     std::getline(std::cin, input);
+    logger->log(std::string("User input: ") + input, MessageType::INFO);
     input_history.push_back(input);
     return input;
   }
@@ -218,6 +220,8 @@ namespace GosFrontline
   {
     auto board_future = backend().getBoard();
     std::pair<std::vector<std::vector<PieceType>>, int> board = board_future.get();
+
+    std::cout << "Such was the board after move " << board.second << "\n";
 
     for (size_t i = 0; i < board.first[0].size(); i++)
     {
@@ -285,11 +289,11 @@ namespace GosFrontline
 
     if (std::filesystem::exists(file_path))
     {
-      printMsg("File already exists. Overwrite?(y/n)", Color::Yellow);
-      logger->log("File already exists. Asking for client's choice.", MessageType::WARNING);
-      auto result = getInput("");
       while (1)
       {
+        printMsg("File already exists. Overwrite?(y/n)", Color::Yellow);
+        logger->log("File already exists. Asking for client's choice.", MessageType::WARNING);
+        auto result = getInput("");
         if (result[0] == 'y')
         {
           printMsg("Overwriting file.", Color::Green);
@@ -301,7 +305,7 @@ namespace GosFrontline
           printMsg("You chose not to overwrite. Saving to autosave file.", Color::Yellow);
           logger->log("Client Chose not to overwrite file. Writing to default autosave.", MessageType::WARNING);
           file_path = save_location + std::string("/") + autosave_file;
-          return;
+          break;
         }
       }
     }
@@ -359,7 +363,52 @@ namespace GosFrontline
     std::cout << "\e[0m";
   }
 
-  void InterfaceCLI::run()
+  bool InterfaceCLI::readGame()
+  {
+    clearScreen();
+    std::vector<std::string> files{};
+    logger->log("User requested a read game. Now trying read game. Files in directory include: ");
+    for (const auto &file : std::filesystem::directory_iterator(save_location))
+    {
+      logger->log(file.path().filename().string());
+      files.push_back(file.path().filename().string());
+    }
+    std::string toload = "";
+    while (toload == "")
+    {
+      printMsg("Here are the saved games:");
+      for (int i = 0; i < files.size(); i++)
+      {
+        printMsg(std::to_string(i + 1) + ". " + files[i]);
+      }
+      std::string ipt = getInput("Which file would you like to load? (Enter number) ");
+      int sequence;
+      try
+      {
+        sequence = std::stoi(ipt) - 1;
+      }
+      catch (std::invalid_argument &e)
+      {
+        clearScreen();
+        printMsg("Invalid input. Please enter a number.", Color::Red);
+        continue;
+      }
+      if (sequence < files.size())
+        toload = files.at(sequence);
+      else
+      {
+        clearScreen();
+        printMsg("Invalid input. Please enter a number within the range of " + std::to_string(files.size()) + ".", Color::Red);
+        continue;
+      }
+    }
+    auto reply = backend().loadGame(save_location + std::string("/") + toload);
+    reply.wait();
+    return reply.get();
+  }
+
+  void
+  InterfaceCLI::run()
   {
     printWelcome();
 
@@ -414,6 +463,7 @@ namespace GosFrontline
                 logstream << "Got bad input for side selection: failed 3 times. Defaulting to sente.";
                 logger->log(logstream.str(), MessageType::WARNING);
                 logstream.str("");
+                break;
               }
 
               logstream.str("");
@@ -447,22 +497,36 @@ namespace GosFrontline
             backend().reverseSides();
             backend().callEngine();
           }
-          
+
           printBoard();
           position = CurrentState::InGame;
           current_prompt = game_prompt;
           pve = true;
           break;
         case 2:
+          logger->log("User input requested a read game.");
+          if (readGame())
+          {
+          position = CurrentState::InGame;
+           logger->log("Read game successful!");
+           printBoard();
+           current_prompt = game_prompt;
+           game_over = false;
+           // Backend will handle engine move if applicable.
+          }else{
+            logger->log("Read game failed!", MessageType::ERROR);
+            printMsg("Could not read the saved game. Is the file corrupt?", Color::Red);
+          }
+          
           break;
         case 3:
+          quit();
           break;
         case 4:
           break;
         case 5:
           break;
         case 6:
-          quit();
           break;
 
         default:
@@ -617,7 +681,14 @@ namespace GosFrontline
           } // reply status
         } // res != -1
         else
-        { // res == (-1 -1) Now you are sure this is one char
+        { // res == (-1 -1) Now you are sure this is one char (or nothing!)
+          if (input == "")
+          {
+            clearScreen();
+            printBoard();
+            printBadInput();
+          }
+
           switch (input[0])
           {
           // case 'u':
@@ -635,16 +706,34 @@ namespace GosFrontline
             break;
           case 's':
           case 'S':
+            clearScreen();
             save();
             printBoard();
             break;
           case 'u':
           case 'U':
+            if (game_over)
+            {
+              printMsg("Game is over! You cannot undo anymore.", Color::Yellow);
+              logger->log("User tried to make an undo after game was over.", MessageType::WARNING);
+              continue;
+            }
+            clearScreen();
             undo();
             printBoard();
 
             break;
+          case 'v':
+          case 'V':
+            clearScreen();
+            save();
+            current_prompt = menu_prompt;
+            position = CurrentState::MainMenu;
+            clearScreen();
+            break;
           default:
+            clearScreen();
+            printBoard();
             printBadInput();
             break;
           }
